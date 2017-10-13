@@ -1,0 +1,495 @@
+---
+title: "Bad Habits and Health "
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Indagare interrelazione tra bad habits: fumare, bere, dormire poco, poco allenamento
+              poche verdure
+
+Indagare la relazione tra depressione, insonnia, e le altre cose brutte
+
+Indagare la relazione tre le bad habits e le cose brutte
+```{r}
+library(devtools)
+install_github("StatsWithR/statsr")
+library(dplyr)
+library(statsr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+```
+```{r}
+load("brfss2013.RData")
+```
+
+```{r}
+#function to compute the drinksper day
+drinks_per_day <- function(alcday, avedrnk, drinker) {
+  output <- ifelse(alcday < 200, (alcday - 100)*avedrnk/7,
+   (alcday - 200)*avedrnk/30)
+  return(output)
+}
+```
+
+```{r}
+brfss2013 <- brfss2013 %>%
+   mutate(drinker = ifelse((alcday5 > 100) & (alcday5 < 231), "Yes", "No"))
+brfss2013 <- brfss2013 %>%
+   mutate(drnk_perdy = ifelse(drinker == "No", 0, drinks_per_day(alcday5, avedrnk2, drinker)))
+```
+
+```{r}
+brfss2013 %>%
+   group_by(drinker) %>%
+   summarise(count = n())
+
+brfss2013 %>%
+  group_by(drinker) %>%
+  filter(!is.na(drnk_perdy)) %>%
+  summarise(drinks = mean(drnk_perdy))
+
+brfss2013 %>%
+  filter(drinker == "Yes") %>%
+  ggplot(aes(x = drnk_perdy)) +
+  geom_histogram(binwidth = 1)
+
+brfss2013 <- brfss2013 %>%
+  mutate(rsk_drnk = ifelse((drnk_perdy > 2), "Yes", "No"))
+
+Total_drinkers <- brfss2013 %>%
+   filter(drinker == "Yes") %>%
+   nrow()
+brfss2013 %>%
+  filter(drinker == "Yes") %>%
+  group_by(rsk_drnk) %>%
+  summarise(count = n()/Total_drinkers)
+```
+
+The variable `drnk_perdy`is skewed on the right and accumulates at `0`, so we take its logarithm
+
+```{r}
+brfss2013 <- brfss2013 %>%
+  mutate(drnk_perdy_ln = log1p(drnk_perdy))
+summary(brfss2013$drnk_perdy_ln)
+brfss2013 %>%
+  filter(!is.na(drnk_perdy_ln) & (drnk_perdy_ln>0)) %>%
+  ggplot( aes(x=drnk_perdy_ln)) +
+  geom_histogram(binwidth = 0.1)
+```
+
+```{r}
+brfss2013 <- brfss2013 %>%
+  mutate(smoker = ifelse((smokday2 == "Every day") |(smokday2 == "Some days"), "Yes", "No"))
+
+```
+```{r}
+Total_obsv <- brfss2013 %>%
+   nrow()
+brfss2013 %>%
+  group_by(smoker) %>%
+  summarise(count = n()/Total_obsv)
+```
+
+
+```{r}
+summary(brfss2013$sleptim1)
+
+brfss2013 %>%
+  filter(!is.na(sleptim1) & (sleptim1 < 25)) %>%
+  ggplot(aes(x= sleptim1)) +
+  geom_bar()
+```
+
+```{r}
+brfss2013 %>%
+  filter(!is.na(sleptim1) & !is.na(drnk_perdy_ln)) %>%
+  ggplot(aes(x = drnk_perdy_ln, y = sleptim1)) + geom_point()
+```
+Not very meaningful.
+
+```{r}
+brfss2013 %>%
+  filter(!is.na(sleptim1)) %>%
+  group_by(rsk_drnk, smoker) %>%
+  summarise(average_slept_hours = mean(sleptim1), std_slpt_hrs = sd(sleptim1))
+```
+Contrary to what I was expecting, smoking and drinking do not influence too much the avarage number of hours slept.
+
+##Vegetables
+
+```{r}
+# to be used with fvgreen, fvorange and vegetab1
+veg_per_day <- function(fveg) {
+  output <- ifelse((fveg > 100) & (fveg < 200), (fveg - 100),
+              ifelse((fveg > 200) & (fveg < 300), (fveg - 200)/7,
+                ifelse((fveg > 300) & (fveg < 400), (fveg - 300)/30, 0)))
+  return(output)
+}
+```
+We are interested on the times per day someone eates vegetables. In order to get this number we start from `fvgreen`, `fvorange` and `vegetab1` and we count them together to have an overall amount. We store this in `veg_perdy`
+```{r}
+brfss2013 <- brfss2013 %>%
+  mutate(veg_perdy = veg_per_day(fvgreen) + veg_per_day(fvorang) +veg_per_day(vegetab1))
+summary(brfss2013$veg_perdy)
+```
+There are some unrealistic result. For this reason we will filter as NA's result with  more then 20 portions of vegetables a day.
+
+```{r}
+brfss2013 <- brfss2013 %>%
+  mutate(veg_perdy = ifelse(veg_perdy > 20, NA, veg_perdy))
+summary(brfss2013$veg_perdy)
+```
+```{r}
+brfss2013 %>%
+  ggplot(aes(x = veg_perdy)) +geom_histogram(binwidth = 0.1) 
+```
+Also vegetable consumption seems right skewed. We therfore take the logarithm of it
+
+```{r}
+brfss2013 <- brfss2013 %>%
+  mutate(veg_perdy_ln = log1p(veg_perdy))
+summary(brfss2013$veg_perdy_ln)
+brfss2013 %>%
+  filter(!is.na(veg_perdy_ln)) %>%
+  ggplot( aes(x=veg_perdy_ln)) +
+  geom_histogram(binwidth = 0.1)
+```
+
+```{r}
+brfss2013 %>%
+  ggplot(aes(x = drnk_perdy_ln, y =veg_perdy_ln )) + geom_point()
+```
+
+There seem to be a  relation between drinking and eating less vegetables.
+Let's see more about alcohol, smoking and vegetables in a table
+```{r}
+brfss2013 %>%
+  filter(!is.na(veg_perdy)) %>%
+  group_by(rsk_drnk, smoker) %>%
+  summarise(average_veggy_perday = mean(veg_perdy), std_slpt_hrs = sd(veg_perdy))
+```
+
+The avarage amount of vegetables consumed by smokers and drinkers is lower then the general avarage
+1.64.
+We now define a new variable, identifying as bad habit eating vegetables less then once a day.
+
+```{r}
+brfss2013 <- brfss2013 %>%
+  mutate(noveg = ifelse(veg_perdy < 1, "Yes", "No"))
+brfss2013 %>%
+  group_by(noveg) %>%
+  summarise(count = n())
+```
+
+## Physical activity
+The variable `exerany` is all we ar going to use. "No" there will be seen as a bad habit.
+```{r}
+brfss2013 %>%
+  group_by(exerany2) %>%
+  summarise(count = n())
+```
+
+```{r}
+brfss2013 %>%
+#  filter(!is.na(drnk_perdy)) %>%
+  group_by( noveg,rsk_drnk) %>%
+  summarise( n = n()) %>%
+  mutate(freq = n/sum(n))
+```
+
+```{r}
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(rsk_drnk) & !is.na(smoker)) %>%
+  select(rsk_drnk, smoker) %>%
+  group_by(rsk_drnk, smoker) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p1 <- tablegrph %>%
+  ggplot(aes(y = freq, x = rsk_drnk, fill = smoker)) + 
+  geom_bar(stat = "identity" ) +
+  labs(x = "Risky drinker", fill = "Smoker", y = "Proportion")
+``` 
+
+```{r}
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(rsk_drnk) & !is.na(noveg)) %>%
+  select(rsk_drnk, noveg) %>%
+  group_by(rsk_drnk, noveg) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p2 <- tablegrph %>%
+  ggplot(aes(y = freq, x = rsk_drnk, fill = noveg)) + 
+  geom_bar(stat = "identity" )  +
+  labs(x = "Risky drinker", fill = "Scarce veggies", y = "Proportion")
+``` 
+
+```{r}
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(exerany2) & !is.na(noveg)) %>%
+  select(exerany2, noveg) %>%
+  group_by(exerany2, noveg) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p3 <- tablegrph %>%
+  ggplot(aes(y = freq, x = exerany2, fill = noveg)) + 
+  geom_bar(stat = "identity" )  +
+  labs(x = "Does exercise", fill = "Scarce veggies", y = "Proportion")
+``` 
+
+```{r}
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(exerany2) & !is.na(smoker)) %>%
+  select(exerany2, smoker) %>%
+  group_by(exerany2, smoker) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p4 <- tablegrph %>%
+  ggplot(aes(y = freq, x = exerany2, fill = smoker)) + 
+  geom_bar(stat = "identity" )  +
+  labs(x = "Does exercise", fill = "Smoker", y = "Proportion")
+``` 
+
+```{r}
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(exerany2) & !is.na(rsk_drnk)) %>%
+  select(exerany2, rsk_drnk) %>%
+  group_by(rsk_drnk, exerany2) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p5 <- tablegrph %>%
+  ggplot(aes(y = freq, x = rsk_drnk, fill = exerany2)) + 
+  geom_bar(stat = "identity" )  +
+  labs(fill = "Does exercise", x = "Risky Drinker", y = "Proportion")
+
+``` 
+
+```{r}
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(noveg) & !is.na(smoker)) %>%
+  select(noveg, smoker) %>%
+  group_by(noveg, smoker) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p6 <- tablegrph %>%
+  ggplot(aes(y = freq, x = noveg, fill = smoker)) + 
+  geom_bar(stat = "identity" )  +
+  labs(fill = "Smoker", x = "Scarce veggies", y = "Proportion")
+
+``` 
+
+```{r}
+gplots = list(p1, p2, p3, p4, p5, p6)
+margin = theme(plot.margin = unit(c(0.5,0.25,0.5,0.25), "cm"))
+gplots <- lapply(gplots, "+", margin)
+grid.arrange(grobs = gplots,
+             ncol = 2, top = "Relations between bad habits")
+```
+The six plots above, give an intuitive idea of the correlation between the 4 bad habits we are analyzing. In particular it seems that risky drinkers are more likely to be also smokers, and people who do not exercise enough are also unlikely to eat enough vegetables. Less marked, people who do not exercise or do not eat enough vegetables ar slightly more likely to be smokers.
+Drinking seems independent from doing exercise or eating vegetables.
+```{r}
+brfss2013 %>%
+  filter(!is.na(drnk_perdy) & ! is.na(smoker) & !is.na(exerany2) & !is.na(noveg)) %>%
+  ggplot(aes(x = smoker, fill = exerany2, y = drnk_perdy)) + 
+  stat_summary(fun.y = "mean", geom = "bar", position = position_dodge()) +
+  facet_grid(. ~ noveg, labeller = label_both)
+```
+This plot show the avarage number of drinks per day of the sample, conditioned on their habit on smoking, eating vegetables daily, doing exercise activity.
+It is interesting that people who do exercise, tend do drink more alcohol on avarage, as well people who eat daily vegetables.
+Smokers also tend to drink more.
+
+```{r}
+brfss2013 %>%
+  filter(!is.na(veg_perdy) & ! is.na(smoker) & !is.na(exerany2) & !is.na(rsk_drnk)) %>%
+  ggplot(aes(x = rsk_drnk, fill = exerany2, y = veg_perdy)) + 
+  stat_summary(fun.y = "mean", geom = "bar", position = position_dodge()) +
+  facet_grid(. ~ smoker, labeller = label_both)
+```
+From this graph we can see that smokers and people who do not exercise tend to eat less vegetables in avarage.
+
+```{r}
+brfss2013 %>%
+#  filter(!is.na(drnk_perdy)) %>%
+  group_by(smoker, rsk_drnk) %>%
+  summarise(drinks = mean(drnk_perdy), n = n()) %>%
+  mutate(freq = n/sum(n))
+```
+The probability to sample a risky drinker in the smoker's sample (7.47%) is double the probability to sample a risky drinker in the non-smoker's sample (3.62%).
+In the whole sample the probability to be a risky drinker is 6.4%. 
+We are not claiming the difference is significant here, which testing is above the scope of this assignment.
+
+
+
+### Health problems
+
+##Blood Pressure
+bphigh4
+
+```{r}
+brfss2013<- brfss2013 %>%
+  mutate(hgh_prssr = ifelse(is.na(bphigh4), NA,
+                          ifelse(bphigh4 == "No", "No", "Yes")))
+brfss2013 %>%
+  group_by(hgh_prssr) %>%
+  summarise(count = n())
+
+```
+
+##Cholesterol
+We will use the variable `toldhi2` to distinguish between people who had or have cholesterol problems and people without.
+
+```{r}
+brfss2013 %>%
+  group_by(toldhi2) %>%
+  summarise(count = n())
+```
+##Diabete
+We use `diabete3` to define a new variable `dbt_related` which has value "Yes" is the interviewed has diabete, pre-diabetes or had dibetes during pregnancy.
+
+
+```{r}
+brfss2013<- brfss2013 %>%
+  mutate(dbt_related = ifelse(is.na(diabete3), NA,
+                          ifelse(diabete3 == "No", "No", "Yes")))
+brfss2013 %>%
+  group_by(dbt_related) %>%
+  summarise(count = n())
+``` 
+
+
+
+```{r}
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(dbt_related) & !is.na(toldhi2)) %>%
+  select(dbt_related, toldhi2) %>%
+  group_by(dbt_related, toldhi2) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p1 <- tablegrph %>%
+  ggplot(aes(y = freq, x = dbt_related, fill = toldhi2)) + 
+  geom_bar(stat = "identity" )  +
+  labs(fill = "High Cholesterol", x = "Diabete Problem", y = "Proportion")
+
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(dbt_related) & !is.na(hgh_prssr)) %>%
+  select(dbt_related, hgh_prssr) %>%
+  group_by(dbt_related, hgh_prssr) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p2 <- tablegrph %>%
+  ggplot(aes(y = freq, x = dbt_related, fill = hgh_prssr)) + 
+  geom_bar(stat = "identity" )  +
+  labs(fill = "High Pressure", x = "Diabete Problem", y = "Proportion")
+
+tablegrph <-  brfss2013 %>%
+  filter(!is.na(hgh_prssr) & !is.na(toldhi2)) %>%
+  select(toldhi2, hgh_prssr) %>%
+  group_by(toldhi2, hgh_prssr) %>%
+  summarise(count = n()) %>%
+  mutate(freq = count/sum(count))
+p3 <- tablegrph %>%
+  ggplot(aes(y = freq, x = toldhi2, fill = hgh_prssr)) + 
+  geom_bar(stat = "identity" )  +
+  labs(fill = "High Pressure", x = "High Cholesterol", y = "Proportion")
+
+gplots = list(p1, p2, p3)
+margin = theme(plot.margin = unit(c(0.5,0.25,0.5,0.25), "cm"))
+gplots <- lapply(gplots, "+", margin)
+grid.arrange(grobs = gplots,
+             ncol = 1, top = "Relations between Medical Conditions")
+``` 
+
+
+
+##Mental Health
+As a metric on mental health we use the number of days in the past month when the interviewd had mental health problems, `menthlth`. However to, avoid inconsistent values (greater then 30) we clean it and save in `menthlth2`.
+
+```{r}
+brfss2013 <- brfss2013 %>%
+  mutate(menthlth2 = ifelse(menthlth < 31, menthlth, NA))
+brfss2013 %>%
+  filter(menthlth2 > 0) %>%
+  ggplot(aes(x = menthlth2)) +
+  geom_histogram(binwidth = 2)
+```
+this is the sample distribution of the number of days of mental health in the last month, restricted to the samples with at least 1 day of mental health problems
+
+We want to compare the avarage number of days of mental health problems with the subset of people having, diabetes, high cholesterol and high pressure problems.
+
+```{r}
+brfss2013 %>%
+  filter(!is.na(menthlth2) & !is.na(dbt_related) & !is.na(hgh_prssr) & !is.na(toldhi2)) %>%
+  ggplot(aes(x = dbt_related, fill = hgh_prssr, y = menthlth2)) + 
+  stat_summary(fun.y = "mean", geom = "bar", position = position_dodge()) +
+  facet_grid(. ~ toldhi2, labeller = 
+               labeller( toldhi2 = c(Yes = "High Cholesterol", No = "Low Cholesterol"))) +
+  labs(x = "Diabete Problem", y = "Days of Mental problems", fill = "High Pressure")
+```
+
+```{r}
+brfss2013 %>%
+  filter(!is.na(menthlth2) & ! is.na(dbt_related) & !is.na(hgh_prssr) & !is.na(toldhi2)) %>%
+  group_by(toldhi2, dbt_related, hgh_prssr) %>%
+  summarise(mental_bad_days = mean(menthlth2), count = n()) %>%
+  mutate(freq = count/sum(count))
+```
+
+##
+
+#Bad Habits vs Health
+
+```{r}
+numeric_yes_no <- function(yesno) {
+  output <- ifelse(is.na(yesno), 0, 
+                   ifelse(yesno == "Yes", 1, 0))
+  return(output)
+}
+
+compute_bad_habits <- function(drinker, smoker, noveg, exerc) {
+  drinker <- numeric_yes_no(drinker)
+  smoker <- numeric_yes_no(smoker)
+  noveg <- numeric_yes_no(noveg)
+  exerc <- numeric_yes_no(exerc)
+  exerc <- abs(1 - exerc)
+  output <- smoker + drinker + noveg + exerc
+  return(output)
+}
+
+
+brfss2013 <- brfss2013 %>%
+  mutate(badhbts = compute_bad_habits(drinker = rsk_drnk, smoker = smoker, 
+                                      noveg = noveg, exerc = exerany2))
+```
+
+```{r}
+brfss2013 %>%
+  ggplot(aes(x = badhbts)) +
+  geom_histogram()
+```
+
+```{r}
+tablegraph <- brfss2013 %>%
+  filter(!is.na(menthlth2)) %>%
+  group_by(badhbts) %>%
+  summarise(Days_mental_hlth_prblm = mean(menthlth2))
+tablegraph
+```
+```{r}
+tablegraph %>%
+  ggplot(aes(x = badhbts, y = Days_mental_hlth_prblm)) +
+  geom_point() +
+  geom_line()
+```
+
+```{r}
+brfss2013 %>%
+  filter(!is.na(badhbts) & !is.na(dbt_related) & !is.na(hgh_prssr) & !is.na(toldhi2)) %>%
+  ggplot(aes(x = dbt_related, fill = hgh_prssr, y = badhbts)) + 
+  stat_summary(fun.y = "mean", geom = "bar", position = position_dodge()) +
+  facet_grid(. ~ toldhi2, labeller = 
+               labeller( toldhi2 = c(Yes = "High Cholesterol", No = "Low Cholesterol"))) +
+  labs(x = "Diabete Problem", y = "Bad Habits registered out of 4", fill = "High Pressure")
+```
+

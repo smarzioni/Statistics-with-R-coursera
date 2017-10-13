@@ -1,0 +1,467 @@
+---
+title: "Modeling and prediction for movies"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(devtools)
+install_github("StatsWithR/statsr")
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(GGally)
+library(grid)
+library(gridExtra)
+```
+
+### Load data
+
+Make sure your data and R Markdown files are in the same directory. When loaded
+your data file will be called `movies`. Delete this note when before you submit 
+your work. 
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+
+
+* * *
+
+## Part 1: Data
+
+The data is obtained randomly sampling from two databases of movie ratings. As such, analysis on this data can be generalized to the whole population (the totality of the databases), but no causal relation can be infered.
+
+* * *
+
+## Part 2: Research question
+
+How do critics and adience scores relates? And which charactersitics of a movie better explain one or the other rating? It happens that critics and commercial success do not agree, and I wonder if this difference can be explained by the two scores being correlated with different characteristics of the movie.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+###Cleaning the dataset.
+
+First we are going to remove non useful columns of the dataset. There is no interest in the url of the movie entry on the database.
+
+```{r}
+movies <- movies %>%
+  select(-imdb_url, -rt_url)
+```
+Second, the names of actors, directors and productors are strings with too many possible levels to be really meaningful.
+
+```{r}
+movies <- movies %>%
+  select(- actor1, -actor2, -actor3, - actor4, -actor5, -director, -studio)
+```
+Third, we want to analyse ratings and this should not be influenced by dvd release dates, so we drop them. We also drop the release day in the theatres, as it is not expected to be meaningful.
+
+```{r}
+movies <- movies %>%
+  select(-dvd_rel_year, -dvd_rel_month, -dvd_rel_day, -thtr_rel_day)
+```
+
+Finally we remove ratings on imdb as we use the scores on rotten tomatoes becuse separated from critics to audience. We also drop rotten tomatoes ratings, because it is a categorical value and we want to use the numerical value score for comparisons and regressions.
+
+```{r}
+movies <- movies %>%
+  select(-critics_rating, -audience_rating, -imdb_rating, -imdb_num_votes)
+```
+
+The variable `thtr_rel_month`is encoded as numerical but we need it as a factor, because its numbers do not carry any numerical meaning. (On the other hand the year has an absolute meaning of how old a movie is, so we keep it numerical)
+```{r}
+movies <- movies %>%
+  mutate(thtr_rel_month = as.factor(thtr_rel_month))
+```
+###Actual exploration
+
+Lets just do a plot of Audience vs critics scores!
+
+```{r}
+movies %>%
+  ggplot(aes(x= critics_score, y = audience_score )) + geom_point()
+```
+
+They are clearly related, however there is much noise between the two. Numerically the correlation coefficient betweeen the two scores is 
+```{r}
+cor(x = movies$audience_score, y = movies$critics_score)
+```
+
+which is pretty high. However the next graph looks interesting
+```{r}
+movies %>%
+  ggplot(aes(x= critics_score, y = (audience_score -critics_score))) + 
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") 
+```
+
+We plot here the critics score on the x-axis and the difference between audience and critics on the y-axis. If they were to be the same, such points should have been all around the dashed line at y = 0. Finally lets see how the difference is distributed.
+
+```{r}
+summary(movies$audience_score - movies$critics_score)
+```
+
+Median and mean are both greater then zero, and the mean bigger then the median suggests a slightly right-skewed distribution, lets plot it
+
+```{r}
+movies %>%
+  ggplot(aes(x= audience_score - critics_score)) +
+  geom_histogram(binwidth = 10)
+```
+
+From all the picututres and  the summary statistics, it seems that the score difference between critics and audience is slightly asymettric but not that far from a normal distribution. This is more or less what one has to expect. However we want to see with a linear model, if different varibles explain better different scores.
+
+The audience and critics score are not normally distributed and are fairly right skewed. To help have better models we make an exponential modification of them.
+
+```{r}
+movies <- movies %>%
+  mutate(critics_score_exp = exp(critics_score/100)) 
+movies %>%
+ggplot(aes(sample = critics_score_exp)) +
+  stat_qq()
+
+summary(movies$critics_score_exp)
+
+movies <- movies %>%
+  mutate(audience_score_exp = exp(audience_score/100)) 
+movies %>%
+ggplot(aes(sample = audience_score_exp)) +
+  stat_qq()
+summary(movies$audience_score_exp)
+```
+
+We will use these new two variables instead of the pure scores, so we drop the score variables
+
+```{r}
+movies <- movies %>%
+  select(-audience_score, -critics_score)
+```
+
+
+* * *
+
+## Part 4: Modeling
+
+We are now going to construct two linear models, one to predict the `audience_score` and one 
+to predict the `critics_score`. We will do a backward model selection using p-values. At each step we remove the most insignificant variable until we are left with only significant ones. At the end we will have a list of significant variables for both the scores, and we will be able to see if they are different or not. 
+The objective is indeed to find the significant predictors for the two models and compare them, and not do the best predictor possible. For this reason we prefer p values over adjusted R-squared.
+We will use a significance level of 0.05.
+
+We already cleaned the dataset of the unuseful variables, except for the `title`, that we are keeping for reference but we will exclude from the models, and the score the we won't analayse. We only need to omit the na's
+
+```{r}
+movies <-na.omit(movies)
+```
+
+And now we can start to model the critics score.
+
+
+
+###Critcs score linear model selection
+
+```{r}
+model_critics = lm(data = movies, formula = critics_score_exp ~ . -title - audience_score_exp)
+summary(model_critics)
+```
+
+All the levels of `thtr_rel_month` have high p-values with one who reach the maximum  on the table, so we remove it.
+
+```{r}
+model_critics = lm(data = movies, formula = critics_score_exp ~ . -title -audience_score_exp 
+                   -thtr_rel_month)
+summary(model_critics)
+```
+
+Next drop `best_pic_win`
+
+```{r}
+model_critics = lm(data = movies, formula = critics_score_exp ~ . -title -audience_score_exp 
+                   -thtr_rel_month  -best_pic_win)
+summary(model_critics)
+```
+
+Next `best_actress_win` has max p-value.
+
+```{r}
+model_critics = lm(data = movies, formula = critics_score_exp ~ . -title -audience_score_exp 
+                   -thtr_rel_month -best_pic_win -best_actress_win)
+summary(model_critics)
+```
+
+
+Next `best_actor_win` 
+
+```{r}
+model_critics = lm(data = movies, formula = critics_score_exp ~ . -title -audience_score_exp 
+                   -thtr_rel_month -best_actress_win -best_pic_win -best_actor_win)
+summary(model_critics)
+```
+
+Next comes `runtime`
+
+```{r}
+model_critics = lm(data = movies, formula = critics_score_exp ~ . -title -audience_score_exp 
+                   -thtr_rel_month -best_actress_win -best_pic_win -best_actor_win -runtime)
+summary(model_critics)
+```
+
+At this point all the predictors are significant. To simplify the content of the formula in the lm object we recompute the model with the found columns. This is useful for making predictions.
+
+```{r}
+model_critics = lm(data = movies, formula = critics_score_exp ~ title_type + genre +
+                     mpaa_rating + thtr_rel_year + best_pic_nom + best_dir_win + top200_box)
+```
+
+###Audience linear model selection
+
+In a similar way we proceed backward on the p-values to determine `model_adience`to predict the audience score starting from the other variables
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ . -title -critics_score_exp)
+summary(model_audience)
+```
+
+remove `thtr_rel_month`, who has insignificant p values on all its levels
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ . -title -critics_score_exp 
+                    -thtr_rel_month)
+summary(model_audience)
+```
+
+remove `best_pic_win`
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ . -title -critics_score_exp 
+                    -thtr_rel_month - best_pic_win)
+summary(model_audience)
+```
+
+remove `best_actor_win`
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ . -title -critics_score_exp 
+                    -thtr_rel_month - best_pic_win - best_actor_win)
+summary(model_audience)
+```
+
+remove `best_actress_win`
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ . -title -critics_score_exp 
+                    -thtr_rel_month - best_pic_win - best_actress_win - best_actor_win)
+summary(model_audience)
+```
+
+remove `best_dir_win`
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ . -title -critics_score_exp 
+                    -thtr_rel_month - best_pic_win - best_actress_win - best_actor_win
+                    -best_dir_win)
+summary(model_audience)
+```
+
+remove `title_type` 
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ . -title -critics_score_exp 
+                    -thtr_rel_month - best_pic_win - best_actress_win - best_actor_win
+                    -best_dir_win - title_type)
+summary(model_audience)
+```
+
+
+All the variables in this model are now significant. We rewrite it now, to have a formula with only plus signs as we did for critics_score.
+
+```{r}
+model_audience = lm(data = movies, formula = audience_score_exp ~ genre + runtime +
+                      mpaa_rating + thtr_rel_year + best_pic_nom + top200_box)
+```
+* * *
+
+
+###Models Dignostics
+
+We start with the model for critics score.
+
+```{r diag-critics-model}
+# type your code for the Exercise here, and Knit
+ggplot(data = model_critics, aes(x = .fitted, y = abs(.resid))) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  xlab("Fitted values") +
+  ylab("Abs value of Residuals")
+
+ggplot(data = model_critics, aes(sample = .resid)) +
+  stat_qq()
+
+ggplot(data = model_critics, aes(x = .resid)) +
+  geom_histogram(binwidth = 0.1) +
+  xlab("Residuals")
+```
+
+The residuals seems fairly normally distributed, however the first graph shows that as the score increase the absulute value of the residuals is not approximately constant, so the assumption that the residual have constant variance may be violated.
+
+We also need to check the linearity assumption, i.e. we want to plot residuals vs eache variable, and hope that they have constant variance.
+```{r}
+movies <- movies %>%
+  mutate(audience_resid = residuals(model_audience)) %>%
+  mutate(critics_resid = residuals(model_critics))
+
+movies %>%
+  ggplot(aes(x = title_type, y = critics_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = genre, y = critics_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = mpaa_rating, y = critics_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = thtr_rel_year, y = critics_resid))+
+  geom_point()
+movies %>%
+  ggplot(aes(x = best_pic_nom, y = critics_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = best_dir_win, y = critics_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = top200_box, y = critics_resid)) +
+  geom_boxplot()
+
+```
+
+From this plot we can see some variation in the cariance in the `title_type`, `genre`, `best_pic_nom`and `mapaa_rating`, however we will have to live with them. These may indicate a non linear relationship
+
+***
+
+Now we look at the same dignostic graphs for the audience score model
+
+
+```{r diag-audience-model}
+# type your code for the Exercise here, and Knit
+ggplot(data = model_audience, aes(x = .fitted, y = abs(.resid))) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  xlab("Fitted values") +
+  ylab("Abs value of Residuals")
+
+ggplot(data = model_audience, aes(sample = .resid)) +
+  stat_qq()
+
+ggplot(data = model_audience, aes(x = .resid)) +
+  geom_histogram(binwidth = 0.1) +
+  xlab("Residuals")
+```
+
+Similarly to the model for the critics score, the residuals are fairly normal, however their vairiance does not seem to be constant with respect to the fitted scores. This may indicate a failing of the assumption of constant variance of the residuals. 
+Now for the linearity assumption
+
+```{r}
+movies %>%
+  ggplot(aes(x = genre, y = audience_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = runtime, y = audience_resid))+
+  geom_point()
+movies %>%
+  ggplot(aes(x = mpaa_rating, y = audience_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = thtr_rel_year, y = audience_resid))+
+  geom_point()
+movies %>%
+  ggplot(aes(x = best_pic_nom, y = audience_resid)) +
+  geom_boxplot()
+movies %>%
+  ggplot(aes(x = top200_box, y = audience_resid)) +
+  geom_boxplot()
+```
+
+As for the critics there is some variation on the variance for the `genre`, `best_pic_nom` and `mpaa_rating`, however here we also have the `runtime` variable, where for long runtimes the few residuals seems to have a different behaviour. For this variable the linear relationship in the case of long films should not be taken for good.
+
+###Interpretation of the models
+
+Let us start with the critics scores, and report the summary
+
+```{r}
+summary(model_critics)
+#Critics score Summary:
+summary(movies$critics_score_exp)
+```
+
+First of all, the adjusted R-square is 0.30 so the model actully explain only a small part of the critics score.
+Second, the most appreciated title type seems to be documentary, as both the other two have a negative coefficient.
+Third, only adult films (mpaa rating NC-17) seems to be more appreciated by the critics than all the other categories of restriction.
+Fourth, the year of release is negatively associated with the critics score.
+Other similar observation are possible but thisis not the objective of this study.
+
+Now for the audience score
+
+```{r}
+summary(model_audience)
+#Audience score Summary:
+summary(movies$audience_score_exp)
+```
+
+The model adjusted R-squared is only 0.27 so this is a even worse model then the one before.
+Some difference with the critics score:
+Audiance gives less score advantage to films rated NC-17 then critics. Indded It has a negative coefficient here, comparable to the coefficient of other ratings levels.
+Runtime is significant for audience but not for Critics, and it is positively correlated to the audiance score.
+Both the scores are positively correlated to the movie box office performance and the movie being nominated to to best picture oscar.
+
+## Part 5: Prediction
+
+For the prediction we use Batman v Superman: Dawn of Justice. It was a commercial success but generally considered a bad film, it has critics score 27 and audience score 63.
+```{r}
+BvS <- data.frame(title = "Batman V Superman: dawn of Justice", 
+                  title_type = "Feature Film",
+                  genre = "Action & Adventure",
+                  runtime = 151,
+                  mpaa_rating = "PG-13",
+                  thtr_rel_year = 2016,
+                  best_pic_nom = "no",
+                  best_dir_win = "no",
+                  top200_box = "yes")
+exp_critics_pred <- predict(model_critics, BvS, interval = "prediction", level = 0.95)
+exp_audience_pred <- predict(model_audience, BvS, interval = "prediction", level = 0.95)
+critics_pred <- log(exp_critics_pred)*100
+audience_pred <- log(exp_audience_pred)*100
+critics_pred
+audience_pred
+```
+
+As we can see from the fitted values the model overestimates the critics score for this movie but it is pretty good in getting the audience score.
+
+However the intervals make clear how weak these two models for predicting scores actually are. The interval of prediction is ample in both cases but for the critics score it actually enables impossible (negative) scores! 
+However there is an interesting sentence we can deduce for thi example
+
+"With 95% confidence level we expect the audience score to be between 23.95 and 94.30"
+
+This is actually interesting considering that the critics in reality scored the movie 27, at the very left of this interval.
+
+
+
+* * *
+
+## Part 6: Conclusion
+
+In genral I would say that the research is a failure, meaning that we learnt almost only negative facts:
+
+Linear models for movie scores from other movie descriptors are not that effective.
+Even if we had some difference in significant varibles between the model for critics and audience score, these where very few, and in general the models were too weak to make such difference in varible selection being meaningful. In the prediction for example, we took a movie with very different score from critics and audience, but both the models gave a result more near to the actual audience score.
+
+I suspect that if there is a way to differentiate between the two, one needs more complicated (non linear) models and maybe more possible variables on the movies. Indeed our dignostic analysis already showed the weakness of the linearity assumption.
+

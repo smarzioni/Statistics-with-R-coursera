@@ -1,0 +1,169 @@
+---
+title: "Statistical inference with the GSS data"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(devtools)
+install_github("StatsWithR/statsr")
+library(ggplot2)
+library(dplyr)
+library(statsr)
+```
+
+### Load data
+
+Make sure your data and R Markdown files are in the same directory. When loaded
+your data file will be called `gss`. Delete this note when before you submit 
+your work. 
+
+```{r load-data}
+load("gss.Rdata")
+```
+
+
+
+* * *
+
+## Part 1: Data
+The GSS data is collected interviewing randomly selected people in housholds in the United States. As such conclusion from this data can be considered generalizable to the US population but can not be used for reasinong on causality between variables, because no random assignment was used in collecting data.
+
+* * *
+
+## Part 2: Research question
+I would like to analyze the relation between two variables, the frequency of newspeaper read `news` and the inflation-adjusted income  `coninc`. This should adress the question 'Does reading news and keeping updated relate with the family income?'
+People often says tha keeping yourself informed helps in the game of life, I want to see this here.
+Moreover I would like to see how this relation has changed over a 20 years span, focusing on 1982 and 2012.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+First let's have a look ato some common statistics of the income `coninc` grouped by the news habits, on the whole dataset
+
+```{r}
+nnrow <- gss %>%
+  filter(!is.na(coninc))%>%
+  nrow()
+gss %>%
+  group_by(news) %>%
+  filter(!is.na(coninc))%>%
+  summarise(freq = n()/nnrow, avarege_income = mean(coninc), median_income = median(coninc),
+            std_income = sd(coninc))
+```
+Even if the avarages and the medians change with the variable `news` the large standard deviation suggests that this differences are not that significant. Let's visualize this with a boxplot
+```{r}
+gss %>%
+  filter(!is.na(coninc)) %>%
+  ggplot(aes(x = news, y = coninc)) +
+  geom_boxplot()
+```
+
+As we were wondering, the interquartile boxes have a lot of overlap so probabli the difference won't be that significant. 
+Before going to test our question we look at the same picture in two particular years, 1982 and 2012.
+
+```{r}
+nnrow <- gss %>%
+  filter(!is.na(coninc) & year == 1982)%>%
+  nrow()
+gss %>%
+  group_by(news) %>%
+  filter(!is.na(coninc) & year == 1982)%>%
+  summarise(freq = n()/nnrow, avarege_income = mean(coninc), median_income = median(coninc),
+            std_income = sd(coninc))
+gss %>%
+  filter(!is.na(coninc) & year == 1982) %>%
+  ggplot(aes(x = news, y = coninc)) +
+  geom_boxplot()
+```
+
+Differences are more marked in 1982 then in the whole dataset. Moreover the distribution of the pupolation with respect to the variable news is remarkably more concentreted on Everyday and Few Times a Week.
+
+```{r}
+nnrow <- gss %>%
+  filter(!is.na(coninc) & year == 2012)%>%
+  nrow()
+gss %>%
+  group_by(news) %>%
+  filter(!is.na(coninc) & year == 2012)%>%
+  summarise(freq = n()/nnrow, avarege_income = mean(coninc), median_income = median(coninc),
+            std_income = sd(coninc))
+gss %>%
+  filter(!is.na(coninc) & year == 2012) %>%
+  ggplot(aes(x = news, y = coninc)) +
+  geom_boxplot()
+```
+
+The year 2012 represent better the situation on the whole dataset.
+
+* * *
+
+## Part 4: Inference
+
+We will do different inference tests here, using the `inference` function from the `statsr` library.
+
+### ANOVA news vs income 
+
+Check the difference in avarage of a continuous variable between classes of a  categorical with an ANOVA requires the contiuous variable to be nearly normal. `coninc`is right skewed, so first we try to normalize it with a log1p transform.
+
+```{r}
+gss <- gss %>%
+  mutate(coninc_ln1p = log1p(coninc))
+gss %>%
+  group_by(news) %>%
+  filter(!is.na(news) & !is.na(coninc_ln1p))%>%
+  summarise(count = n(), avarege_income = mean(coninc_ln1p), 
+            median_income = median(coninc_ln1p),
+            std_income = sd(coninc_ln1p),
+            rel_sigma = std_income/avarege_income )
+gss %>%
+  filter(!is.na(news) & !is.na(coninc_ln1p)) %>%
+  ggplot(aes(x = news, y = coninc_ln1p)) +
+  geom_boxplot()
+gss %>%
+  filter(!is.na(coninc_ln1p)) %>%
+  ggplot(aes(x = coninc_ln1p)) +
+  geom_histogram(binwidth = 0.1)
+```
+
+even if not perfectly normal (now it is slightly left skewed), medians and means are much more similar and we will use this for the ANOVA, taking this as sufficiently normal. 
+Next the standard deviation between classes varies from 0.89 to 1.11, and these are between 8.5% to 11 % of the respective averages. So we consider the variances to be about equal across the classes.
+Finally the samples are considered independent since the GSS is supposed to randomly sample , and the sample sizes are less the 10% of the population.
+We can now perform an ANOVA test on the whole dataset
+
+```{r}
+gss_income <- gss %>%
+  filter(!is.na(coninc_ln1p) & !is.na(news))
+
+inference(y = coninc_ln1p, x = news, data = gss_income, statistic = "mean", type = "ht", 
+          alternative = "greater", method = "theoretical")
+```
+
+The ANOVA test results in small p-value, so the null-hypothesis "The avarage income is equal for all the classes of reading a newspaper" is refused in favor of accepting the alternative hypothesis. Moreover the `inference`function provides us with the p-values of the pairwise t-tests. having (5-1)*4/2 = 10 pairs, and starting from a significance of 0.05, all the pairs with p-values less then 5e-3 are to be considered significantly different in avarage of income. So evry pair except "Less then Once a Week"---"Once a Week"
+We now repeat the inference focusing on the years 2012 and 1982 separately.
+
+```{r}
+gss82 <- gss_income %>%
+  filter(year == 1982)
+
+inference(y = coninc_ln1p, x = news, data = gss82, statistic = "mean", type = "ht", 
+          alternative = "greater", method = "theoretical")
+```
+
+```{r}
+gss12 <- gss_income %>%
+  filter(year == 2012)
+
+inference(y = coninc_ln1p, x = news, data = gss12, statistic = "mean", type = "ht", 
+          alternative = "greater", method = "theoretical")
+```
+
+Even if both the tests for 1982 and 2012 have p-value lower then the significance level, the F-score is way more small (333 in general, 21 in 1982 and 8 in 2012). In particular in 2012 only 4 pairs pass the pairwise t-test with 0.05 significance, see the table above.

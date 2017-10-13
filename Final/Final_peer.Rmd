@@ -1,0 +1,707 @@
+---
+title: "Peer Assessment II"
+output:
+  html_document: 
+    pandoc_args: [
+      "--number-sections",
+    ]
+---
+
+# Background
+
+As a statistical consultant working for a real estate investment firm, your task is to develop a model to predict the selling price of a given home in Ames, Iowa. Your employer hopes to use this information to help assess whether the asking price of a house is higher or lower than the true value of the house. If the home is undervalued, it may be a good investment for the firm.
+
+# Training Data and relevant packages
+
+In order to better assess the quality of the model you will produce, the data have been randomly divided into three separate pieces: a training data set, a testing data set, and a validation data set. For now we will load the training data set, the others will be loaded and used later.
+
+```{r load, message = FALSE}
+load("ames_train.Rdata")
+```
+
+Use the code block below to load any necessary packages
+
+```{r packages, message = FALSE}
+library(devtools)
+install_github("StatsWithR/statsr")
+library(MASS)
+library(ggplot2)
+library(statsr)
+library(dplyr)
+library(BAS)
+```
+
+## Part 1 - Exploratory Data Analysis (EDA)
+
+When you first get your data, it's very tempting to immediately begin fitting models and assessing how they perform.  However, before you begin modeling, it's absolutely essential to explore the structure of the data and the relationships between the variables in the data set.
+
+Do a detailed EDA of the ames_train data set, to learn about the structure of the data and the relationships between the variables in the data set (refer to Introduction to Probability and Data, Week 2, for a reminder about EDA if needed). Your EDA should involve creating and reviewing many plots/graphs and considering the patterns and relationships you see. 
+
+After you have explored completely, submit the three graphs/plots that you found most informative during your EDA process, and briefly explain what you learned from each (why you found each informative).
+
+* * *
+
+
+```{r creategraphs}
+ames_train %>%
+  ggplot(aes(x = as.factor(Garage.Cars), y = log(price))) + geom_boxplot() +
+  xlab("Garage Car's capacity") + ggtitle("Garage Car's capacity vs log(price)")
+
+ames_train %>%
+  ggplot(aes(x = log(2017 - Year.Built), y = log(price))) + geom_point() +
+  xlab("log(age)") + ggtitle("Log(age) vs Log(price)")
+
+ames_train <- ames_train %>%
+  mutate(MS.SubClass = as.factor(MS.SubClass))
+ames_train %>%
+  ggplot(aes(x = MS.SubClass, y = log(price))) + geom_boxplot() +
+  ggtitle("MS.SubClass Vs. Log(price)")
+
+```
+
+In the three graphs above I have plotted three variables I am going to use against the `log(price)`. For the varaible `Garage.Cars` I preferred to plot it as boxbplot even if in the end I am going to use it as a numerical, because this plot is much more informative. Indeed it seems from this plot that the price follows a pretty different distribution for each possible value of `Garage.Cars`, not just a different mean value.  
+  
+In the secon plot, the inverse linear relationship between `log(price)`and `log(2017 - Year.Built)` (that is the log of age) is evident. This is going in my model for sure.  
+
+Finally `log(price)`follows differents distribution for different `MS.SubClass` levels. Notice that in the original dataset this is coded as a numeric variable but it is in fact a categorical (numbers are just codes) so it will need to be converted with `as.factor`.
+
+* * *
+
+## Part 2 - Development and assessment of an initial model, following a semi-guided process of analysis
+
+### Section 2.1 An Initial Model
+In building a model, it is often useful to start by creating a simple, intuitive initial model based on the results of the exploratory data analysis. (Note: The goal at this stage is **not** to identify the "best" possible model but rather to choose a reasonable and understandable starting point. Later you will expand and revise this model to create your final model.
+
+Based on your EDA, select *at most* 10 predictor variables from â€œames_trainâ€ and create a linear model for `price` (or a transformed version of price) using those variables. Provide the *R code* and the *summary output table* for your model, a *brief justification* for the variables you have chosen, and a *brief discussion* of the model results in context (focused on the variables that appear to be important predictors and how they relate to sales price).
+
+* * *
+
+The 10 variables I decide to start with are: area, neighbourhood, TotRms.AbvGrd, Garage.Cars, Overall.Qual, Exter.Qual, Paved.Drive, log(2017 - Year.Built), MS.Zoning, as.factor(MS.SubClass).
+
+These have been chosen starting by my intuitive idea of what determines an house price, and using exloratoryplots like the ones from the previous section.  
+
+In order to avoid confusion with na's and other variables we copy only the selected varibles in a new dataframe.
+
+```{r}
+selected_ames_train <- ames_train %>%
+  select(price, area, Neighborhood, TotRms.AbvGrd, Garage.Cars, Overall.Qual, Exter.Qual,
+         Paved.Drive, Year.Built, MS.Zoning, MS.SubClass) 
+```
+
+```{r}
+count_na <- function(x)
+  return(sum(is.na(x)))
+
+nas <- data.frame(name = names(selected_ames_train), nas_counted = sapply(selected_ames_train, count_na))
+arrange(.data = nas, desc(nas_counted)) %>%
+  head(5)
+```
+
+Only one na in Garage.Cars. We will omit it.
+```{r}
+selected_ames_train <- na.omit(selected_ames_train)
+``` 
+
+```{r fit_model}
+model_full <- lm(data = selected_ames_train, log(price) ~ log(area) +
+                   Neighborhood +
+                   log(1 + TotRms.AbvGrd) +
+                   log(1+Garage.Cars) +
+                   Overall.Qual +
+                   Exter.Qual +
+                   Paved.Drive+
+                   log(2017 - Year.Built) +
+                   MS.Zoning +
+                   MS.SubClass )
+summary(model_full)
+```
+
+* * *
+
+### Section 2.2 Model Selection
+
+Now either using `BAS` another stepwise selection procedure choose the "best" model you can, using your initial model as your starting point. Try at least two different model selection methods and compare their results. Do they both arrive at the same model or do they disagree? What do you think this means?
+
+* * *
+We are going to use `stepAIC` with $K = 2$ (AIC) and $k = \log(n)$ (BIC). Both these selection methods are done stepwise.
+
+```{r model_select}
+print("Model Selection with BIC" )
+model.BIC <- stepAIC(model_full, k = log(nrow(selected_ames_train)))
+print("Model Selection with AIC" )
+model.AIC <- stepAIC(model_full, k = 2)
+
+```
+
+The model selection with BIC excludes Neighbourhood and TotalRms.AbvGrd.  
+The model selection with AIC keeps all the variables.
+
+The BIC criterion puts more weight in the degree of fredom of the model then the AIC as $\log(n)$ is grater then $2$. This may explain the exclusion of `Neighbourhood` as it accounts for 26 degree of freedom.
+
+```{r}
+summary(model.AIC)
+summary(model.BIC)
+``` 
+
+* * *
+
+### Section 2.3 Initial Model Residuals
+One way to assess the performance of a model is to examine the model's residuals. In the space below, create a residual plot for your preferred model from above and use it to assess whether your model appears to fit the data well. Comment on any interesting structure in the residual plot (trend, outliers, etc.) and briefly discuss potential implications it may have for your model and inference / prediction you might produce.
+
+* * *
+
+
+
+```{r model_resid}
+selected_ames_train <- selected_ames_train %>%
+  mutate(resid.AIC = residuals(model.AIC), fitted.AIC = fitted(model.AIC))
+
+selected_ames_train %>%
+  ggplot(aes(x= resid.AIC)) + geom_histogram(binwidth =  0.1)
+```
+
+The residual seems to be slightly left skewed, but relly only slightly due to some outliers. So the assumption that they are normally distributed seems acceptable.
+
+```{r}
+selected_ames_train %>%
+  ggplot(aes(y = resid.AIC, x = fitted.AIC)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0)
+```
+
+Variation of the residuals seem uniformly distributed with respect ot the fitted values, however there are some otliers, with one particularly bad (the only point with residual less the $-1.5$).  
+Removing such outlier could improve the residual distribution.
+
+* * *
+
+### Section 2.4 Initial Model RMSE
+
+You can calculate it directly based on the model output. Be specific about the units of your RMSE (depending on whether you transformed your response variable). The value you report will be more meaningful if it is in the original units (dollars).
+
+* * *
+
+
+```{r model_rmse}
+# Extract Predictions
+predict.AIC <- exp(predict(model.AIC, selected_ames_train))
+
+# Extract Residuals
+resid.AIC <- selected_ames_train$price - predict.AIC
+
+# Calculate RMSE
+rmse.AIC.train <- sqrt(mean(resid.AIC^2))
+rmse.AIC.train
+```
+
+The RMSE in the train dataset is $29001.38$ dollars.
+
+* * *
+
+### Section 2.5 Overfitting 
+
+The process of building a model generally involves starting with an initial model (as you have done above), identifying its shortcomings, and adapting the model accordingly. This process may be repeated several times until the model fits the data reasonably well. However, the model may do well on training data but perform poorly out-of-sample (meaning, on a dataset other than the original training data) because the model is overly-tuned to specifically fit the training data. This is called â€œoverfitting.â€ To determine whether overfitting is occurring on a model, compare the performance of a model on both in-sample and out-of-sample data sets. To look at performance of your initial model on out-of-sample data, you will use the data set `ames_test`.
+
+```{r loadtest, message = FALSE}
+load("ames_test.Rdata")
+```
+
+Use your model from above to generate predictions for the housing prices in the test data set.  Are the predictions significantly more accurate (compared to the actual sales prices) for the training data than the test data?  Why or why not? Briefly explain how you determined that (what steps or processes did you use)?
+
+* * *
+
+First let's select the variables we are going to use
+
+```{r}
+selected_ames_test <- ames_test %>%
+  select(price, area, Neighborhood, TotRms.AbvGrd, Garage.Cars, Overall.Qual, Exter.Qual,
+         Paved.Drive, Year.Built, MS.Zoning, MS.SubClass) %>%
+  mutate(MS.SubClass = as.factor(MS.SubClass))
+```
+
+and check for NA's on the relevant variables
+
+```{r}
+nas <- data.frame(name = names(selected_ames_test), nas_counted = sapply(selected_ames_test, count_na))
+arrange(.data = nas, desc(nas_counted)) %>%
+  head(5)
+```
+
+Great no, NA's. 
+However the test set contains a Nighbourhood not encountered in the training set, and the model doesn't know how to handle it
+```{r}
+model.AIC$xlevels$Neighborhood
+levels(selected_ames_test$Neighborhood)
+```
+
+We can look for rows containing the new `Nighbourhood` named `Landmrk`.
+
+```{r}
+selected_ames_test[selected_ames_test$Neighborhood == "Landmrk",]
+```
+
+It is only one row out of 817, so we better just ignore it as it won't affect testing too much.
+
+```{r}
+selected_ames_test <- selected_ames_test[selected_ames_test$Neighborhood != "Landmrk",]
+```
+
+So we can make prediction on the test dataset, and use them to comupte the RMSE. This number will be directly comparable with the RMSE from the training set.
+
+```{r initmodel_test}
+# Extract Predictions
+predict.AIC <- exp(predict(model.AIC, selected_ames_test))
+
+# Extract Residuals
+resid.AIC <- selected_ames_test$price - predict.AIC
+
+# Calculate RMSE
+rmse.AIC.test <- sqrt(mean(resid.AIC^2))
+rmse.AIC.test
+```
+
+The RMSE in the test set is $24261\$$, versus the $29001.38\$$ from the train set.  
+Being an error, is actually surprising that the model performs better on the test set then the train set. A priori one should expect the opposite, but maybe it is a sign of a good model!  
+In particular we can say that the model doesn't suffer of overfitting.
+
+* * *
+
+**Note to the learner:** If in real-life practice this out-of-sample analysis shows evidence that the training data fits your model a lot better than the test data, it is probably a good idea to go back and revise the model (usually by simplifying the model) to reduce this overfitting. For simplicity, we do not ask you to do this on the assignment, however.
+
+## Part 3 Development of a Final Model
+
+Now that you have developed an initial model to use as a baseline, create a final model with *at most* 20 variables to predict housing prices in Ames, IA, selecting from the full array of variables in the dataset and using any of the tools that we introduced in this specialization.  
+
+Carefully document the process that you used to come up with your final model, so that you can answer the questions below.
+
+The model in the previous section had a *normalized* RMSE on the train set of
+```{r}
+rmse.AIC.train/(max(selected_ames_train$price) - min(selected_ames_train$price))
+```
+
+$4.8\%$ and on the test set
+```{r}
+rmse.AIC.test/(max(selected_ames_test$price) - min(selected_ames_test$price))
+```
+
+of $3.5\%$.  
+I believe it is pretty good, and it has already 10 variables, so I am not going to add too many caribles.  
+We add `Foundation`, `log(2017 - Year.Remod.Add)` and `log(Total.Bsmt.SF + Lot.Area)` for a total of *13 independent* variables
+
+
+```{r}
+selected_ames_train <- ames_train %>%
+  select(price, area, Neighborhood, TotRms.AbvGrd, Garage.Cars, Overall.Qual, Exter.Qual,
+         Paved.Drive, Year.Built, MS.Zoning, MS.SubClass, Year.Remod.Add, Foundation,
+         Total.Bsmt.SF, Lot.Area, X2nd.Flr.SF)%>%
+  mutate(Total.Area = Total.Bsmt.SF + Lot.Area + X2nd.Flr.SF )
+
+selected_ames_test <- ames_test %>%
+  select(price, area, Neighborhood, TotRms.AbvGrd, Garage.Cars, Overall.Qual, Exter.Qual,
+         Paved.Drive, Year.Built, MS.Zoning, MS.SubClass, Year.Remod.Add, Foundation,
+         Total.Bsmt.SF, Lot.Area, X2nd.Flr.SF)%>%
+  mutate(Total.Area = Total.Bsmt.SF + Lot.Area + X2nd.Flr.SF, MS.SubClass = as.factor(MS.SubClass) )
+```
+
+As we did above we check for NA's in our selected variables
+
+```{r}
+count_na <- function(x)
+  return(sum(is.na(x)))
+
+nas <- data.frame(name = names(selected_ames_train), nas_counted = sapply(selected_ames_train, count_na))
+arrange(.data = nas, desc(nas_counted)) %>%
+  head(5)
+```
+
+Only two rows in the train dataset, as before we will omit them.  
+For the test dataset we remove the lines containing the new neighbourhood ("Landmrk", 1 row) and the new Foundation type ("Wood", 2 rows). Afterward we look for NA's.  
+
+```{r}
+selected_ames_test <- selected_ames_test[selected_ames_test$Neighborhood != "Landmrk",]
+selected_ames_test <- selected_ames_test[selected_ames_test$Foundation != "Wood",]
+
+nas <- data.frame(name = names(selected_ames_test), nas_counted = sapply(selected_ames_test, count_na))
+arrange(.data = nas, desc(nas_counted)) %>%
+  head(5)
+```
+
+No NA's here, perfect.
+
+```{r}
+selected_ames_train <- na.omit(selected_ames_train)
+
+model_full <- lm(data = selected_ames_train, log(price) ~ log(area) +
+                   Neighborhood +
+                   log(1 + TotRms.AbvGrd) +
+                   log(1+Garage.Cars) +
+                   Overall.Qual +
+                   Exter.Qual +
+                   Paved.Drive+
+                   log(2017 - Year.Built) +
+                   MS.Zoning +
+                   MS.SubClass+
+                   log(2017 - Year.Remod.Add) +
+                   Foundation +
+                   log(Total.Area))
+```
+
+We do model stepwise selection again using `stepAIC` with AIC and BIC metrics. We will decide which of the two models to keep based on the test set.
+
+```{r}
+print("Model Selection with AIC")
+model.AIC <- stepAIC(model_full, k = 2)
+print("Model Selection with BIC")
+model.BIC <- stepAIC(model_full, k = log(nrow(selected_ames_train)))
+```
+
+
+We now test the model on the train and test sets, Computing the RMSE and its normalized version:
+
+```{r}
+print("AIC MODEL:")
+# Extract Predictions
+predict.AIC <- exp(predict(model.AIC, selected_ames_train))
+
+# Extract Residuals
+resid.AIC <- selected_ames_train$price - predict.AIC
+
+# Calculate RMSE
+rmse.AIC.train <- sqrt(mean(resid.AIC^2))
+print("Train RMSE")
+rmse.AIC.train
+print("Train normalized RMSE ")
+rmse.AIC.train/(max(selected_ames_train$price) - min(selected_ames_train$price))
+
+# Extract Predictions
+predict.AIC <- exp(predict(model.AIC, selected_ames_test))
+
+# Extract Residuals
+resid.AIC <- selected_ames_test$price - predict.AIC
+
+# Calculate RMSE
+rmse.AIC.test <- sqrt(mean(resid.AIC^2))
+print("Test RMSE")
+rmse.AIC.test
+print("Test normalized RMSE ")
+rmse.AIC.test/(max(selected_ames_test$price) - min(selected_ames_test$price))
+```
+
+```{r}
+print("BIC MODEL:")
+# Extract Predictions
+predict.BIC <- exp(predict(model.BIC, selected_ames_train))
+
+# Extract Residuals
+resid.BIC <- selected_ames_train$price - predict.BIC
+
+# Calculate RMSE
+rmse.BIC.train <- sqrt(mean(resid.BIC^2))
+print("Train RMSE")
+rmse.BIC.train
+print("Train normalized RMSE ")
+rmse.BIC.train/(max(selected_ames_train$price) - min(selected_ames_train$price))
+
+# Extract Predictions
+predict.BIC <- exp(predict(model.BIC, selected_ames_test))
+
+# Extract Residuals
+resid.BIC <- selected_ames_test$price - predict.BIC
+
+# Calculate RMSE
+rmse.BIC.test <- sqrt(mean(resid.BIC^2))
+print("Test RMSE")
+rmse.BIC.test
+print("Test normalized RMSE ")
+rmse.BIC.test/(max(selected_ames_test$price) - min(selected_ames_test$price))
+```
+
+The AIC selected model perform better (even if slightly) both in the Train and the Test set. So `model.AIC` is oure model of choice.
+
+### Section 3.1 Final Model
+
+Provide the summary table for your model.
+
+* * *
+
+
+```{r model_playground}
+summary(model.AIC)
+```
+
+We remark that the adjusted R-squared is 0.873 (better then the in the previous section).  
+We also notice that `log(2017 - Year.Built)`is not significant in this model, while it was pretty important in the previous one. This is probably due to the addition of the variable `log(2017 - Year.Remod.Add)`.  
+On the other hand, the variables `log(Total.Area)` and `log(area)` are both pretty significant, even if them both have to do with area of the house and may be collinear.
+
+* * *
+
+### Section 3.2 Transformation
+
+Did you decide to transform any variables?  Why or why not? Explain in a few sentences.
+
+* * *
+
+I have the following variables transformations  
+* `log(price)`, `log(area)` and `log(Total.Area)`: These three variables are strictly positive, and by this nature rightly skewed. So taking the logarithm of the helps normalize their distributions and linearize their relation.  
+* `log(2017 - Year.Built)` and `log(2017 - Year.Remod.Add)`: for these two variables the `log` is taken for the same reason above, while the difference with `2017`is there to help interpration in terms of years since built (age), or years since remodeled.  
+* `log(1 + TotRms.AbvGrd)`, `log(1 + Garage.Cars)`: The log is taken for the usual reason (right skewed distribution) but the `1 +` prevents logarithms of `0`to be called.  
+* `MS.SubClass`has been transformed from numerical to factor, as the numbers are simply codes for some category, and not real numerical informations.
+
+```{r model_assess}
+```
+
+* * *
+
+### Section 3.3 Variable Interaction
+
+Did you decide to include any variable interactions? Why or why not? Explain in a few sentences.
+
+* * *
+
+The variable `log(Total.Area)` is created summing `Total.Area = Total.Bsmt.SF + Lot.Area + X2nd.Flr.SF`. In this way we get an estimate of the total area of surface at disposal.  
+
+```{r model_inter}
+```
+
+* * *
+
+### Section 3.4 Variable Selection
+
+What method did you use to select the variables you included? Why did you select the method you used? Explain in a few sentences.
+
+* * *
+
+I started with 13 variables I found interesting during the exploratory data analysis. Most of them were carefully selected to be significant, have only few NA'and to be the least collinear possible.  
+Afterwards I used stepwise model selection with `AIC` and `BIC`. They both worked well on the model selection in the previous section, and that model was similar to this.
+They both consider a mixing of likelyhood probability and number of features, are simple to interpret and pretty different in their behaviour.  
+Indeed they gave back two quite different models.  
+I choose between the two models created by AIC and BIC selection using RMSE with the test set (see next section for details).
+
+* * *
+
+### Section 3.5 Model Testing
+
+How did testing the model on out-of-sample data affect whether or how you changed your model? Explain in a few sentences.
+
+* * *
+
+From the model testing we got 
+
+```{r, echo=FALSE}
+print("Train RMSE using AIC")
+rmse.AIC.train
+print("Train normalized RMSE using AIC")
+rmse.AIC.train/(max(selected_ames_train$price) - min(selected_ames_train$price))
+
+print("Test RMSE using AIC")
+rmse.AIC.test
+print("Test normalized RMSE using AIC")
+rmse.AIC.test/(max(selected_ames_test$price) - min(selected_ames_test$price))
+
+```
+
+So we have a smaller test error then train error. They are also reasonably small.  
+This means the we are not overfitting, and we are doing a good job at predicting.  
+
+On the other hand, the model selected using BIC gave 
+
+```{r, echo=FALSE}
+print("Train RMSE using BIC")
+rmse.BIC.train
+print("Train normalized RMSE using BIC ")
+rmse.BIC.train/(max(selected_ames_train$price) - min(selected_ames_train$price))
+
+print("Test RMSE using BIC")
+rmse.BIC.test
+print("Test normalized RMSE using BIC ")
+rmse.BIC.test/(max(selected_ames_test$price) - min(selected_ames_test$price))
+```
+
+which are all higher then the results from AIC.  
+
+So the test set permittted me to choose between the two models the one performing better on out of sample data, that is `model.AIC`.
+
+* * *
+
+## Part 4 Final Model Assessment
+
+### Section 4.1 Final Model Residual
+
+For your final model, create and briefly interpret an informative plot of the residuals.
+
+* * *
+
+```{r}
+selected_ames_train <- selected_ames_train %>%
+  mutate(resid.AIC = residuals(model.AIC), fitted.AIC = fitted(model.AIC))
+
+selected_ames_train %>%
+  ggplot(aes(x= resid.AIC)) + geom_histogram(binwidth =  0.1) +
+  ggtitle("Residual histogram distribution")
+
+selected_ames_train %>%
+  ggplot(aes(y = resid.AIC, x = fitted.AIC)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0) +
+  ggtitle("Residuals vs Fitted value")
+```
+
+From both the graphs it appears that there are few outliers. In particular the distribution of the residuals would be nearly normal if not for very few outliers on the left, that makes it slightly left skewed.   
+The outliers are apparent also in the plot of residuals vs. fitted values. Here, if we remove the outliers, the variance of the residuals around the reference line seems sufficiently constant for the assumptions of linear regression.
+
+* * *
+
+### Section 4.2 Final Model RMSE
+
+For your final model, calculate and briefly comment on the RMSE.
+
+* * *
+We computed both test and train RMSE (and its normalized version) above, so we reprot it here
+
+```{r, echo=FALSE}
+print("Train RMSE")
+rmse.AIC.train
+print("Train normalized RMSE ")
+rmse.AIC.train/(max(selected_ames_train$price) - min(selected_ames_train$price))
+
+print("Test RMSE")
+rmse.AIC.test
+print("Test normalized RMSE ")
+rmse.AIC.test/(max(selected_ames_test$price) - min(selected_ames_test$price))
+
+```
+
+The RMSE,  normalized to be between $0$ and $1$, is about $0.047$ for the train set and $0.034$ for the test set. The normalization is usefull to make them directly comparable each other. In any case (also looking at the absolute RMSE) we have lower error in the test set, which suggest we have a robust model against overfitting.
+
+
+* * *
+
+### Section 4.3 Final Model Evaluation
+
+What are some strengths and weaknesses of your model?
+
+* * *
+Strenghts:  
+The model is robust (low test error). It is not too complicated, and most of the variables are readly interpretable.  
+  
+Weaknesses:
+The model does miss some level from some variables like `Neighbourhood` or `Foundation` (such levels miss from the train set).  
+There may be stronger models, as we did used only a part of the variables at disposal.  
+
+
+* * *
+
+### Section 4.4 Final Model Validation
+
+Testing your final model on a separate, validation data set is a great way to determine how your model will perform in real-life practice. 
+
+You will use the â€œames_validationâ€ dataset to do some additional assessment of your final model. Discuss your findings, be sure to mention:
+* What is the RMSE of your final model when applied to the validation data?  
+* How does this value compare to that of the training data and/or testing data?
+* What percentage of the 95% predictive confidence (or credible) intervals contain the true price of the house in the validation data set?  
+* From this result, does your final model properly reflect uncertainty?
+
+```{r loadvalidation, message = FALSE}
+load("ames_validation.Rdata")
+```
+
+* * *
+
+As we did with the test and train, we clean up the database first, to prepare it for making predictions
+
+```{r model_validate}
+selected_ames_validation <- ames_validation %>%
+  select(PID, price, area, Neighborhood, TotRms.AbvGrd, Garage.Cars, Overall.Qual,
+         Exter.Qual,Paved.Drive, Year.Built, MS.Zoning, MS.SubClass, Year.Remod.Add,
+         Foundation,Total.Bsmt.SF, Lot.Area, X2nd.Flr.SF)%>%
+  mutate(Total.Area = Total.Bsmt.SF + Lot.Area + X2nd.Flr.SF, MS.SubClass = as.factor(MS.SubClass) )
+
+selected_ames_validation <- selected_ames_validation[selected_ames_validation$Neighborhood != "Landmrk",]
+selected_ames_validation <- selected_ames_validation[selected_ames_validation$Foundation != "Wood",]
+selected_ames_validation <- selected_ames_validation[selected_ames_validation$MS.Zoning != "A (agr)",]
+selected_ames_validation <- selected_ames_validation[selected_ames_validation$MS.SubClass != "150",]
+
+nas <- data.frame(name = names(selected_ames_validation), nas_counted = sapply(selected_ames_validation, count_na))
+arrange(.data = nas, desc(nas_counted)) %>%
+  head(5)
+```
+
+Now we are ready to compute the RMSE
+
+```{r}
+# Extract Predictions
+predict.AIC <- exp(predict(model.AIC, selected_ames_validation))
+
+# Extract Residuals
+resid.AIC <- selected_ames_validation$price - predict.AIC
+
+# Calculate RMSE
+rmse.AIC.val <- sqrt(mean(resid.AIC^2))
+print("Validation RMSE")
+rmse.AIC.val
+print("Validation normalized RMSE ")
+rmse.AIC.val/(max(selected_ames_train$price) - min(selected_ames_train$price))
+
+```
+
+The validation error of the model is $22893.61\$$ (or normalized $0.038$). This is in line with the train and test errors $28220.11\$$ and $23571.56\$$ (or normalized $0.047$ and $0.034$).  
+In particular this confirms the goodness of the model and its robusteness on out-of-sample data.  
+
+Now we look at confidence intervals in the validation dataset
+
+```{r}
+predict.AIC <- exp(predict(model.AIC, selected_ames_validation, interval = "prediction",
+                           level =  0.95))
+Hits.AIC <- (predict.AIC[,2] <= selected_ames_validation$price) &
+  (predict.AIC[,3] >= selected_ames_validation$price)
+print("Percentage of real values in a 95% conficence interval:")
+sum(Hits.AIC)/length(Hits.AIC)
+
+```
+
+So in the validation dataset $98\%$ of the real prices fall into their respective $95\%$ confidence interval.  if we look at the same estimation for the train set
+
+```{r}
+predict.AIC <- exp(predict(model.AIC, selected_ames_train, interval = "prediction",
+                           level =  0.95))
+Hits.AIC <- (predict.AIC[,2] <= selected_ames_train$price) &
+  (predict.AIC[,3] >= selected_ames_train$price)
+print("Percentage of real values in a 95% conficence interval:")
+sum(Hits.AIC)/length(Hits.AIC)
+```
+
+We get $96\%$. This is more near to the theoretical $95\%$, as one would expect. So the model performs better on the validation then the train set.
+
+The bestter performance, in terms of  percentage of inside-confidence-interval predictions, on the validation dataset goes in parallel to the better performance in terms of RMSE of the model on the validation and test datasets thet we saw before. 
+
+
+Finally let us find undervalued and overvalued houses in the validation data:
+
+```{r}
+selected_ames_validation <- selected_ames_validation %>%
+  mutate(Resid = price - exp(predict(model.AIC, selected_ames_validation)) ) 
+selected_ames_validation %>%
+  select(PID, Resid) %>%
+  arrange(desc(Resid)) %>%
+  head(5)
+selected_ames_validation %>%
+  select(PID, Resid) %>%
+  arrange(Resid) %>%
+  head(5)
+```
+
+The most undervalued house has `PID` 528360050 while the most overvalued has `PID` 902302150. One can use this PID numbers to finds them in the original database. We remark only that the overvalueing is not too much high while there are a couple of serious cases of undervaluing (see the first table above).
+
+* * *
+
+## Part 5 Conclusion
+
+Provide a brief summary of your results, and a brief discussion of what you have learned about the data and your model. 
+
+* * *
+
+Linear models seems to work pretty well in predicting house prices, given all the parameters of the house. Indeed in the AMES dataset, without using too many advanced techniques we briefly reached performance with errors of the order of $5\%$ on test data (what I called before normalized RMSE).
+The model I made started out pretty economic (only 13 variables) and out of two selection techniques that I tried only one kept all the variables. Even if I preferred this last one, because better performing on the test set, the other was not performin badly at all, so  in the end, the number of variables needed is not really that big.  
+Probably a better feature tuning (finding new relevant futures as computations over the one we already have) would give even better results.
+
+
+* * *

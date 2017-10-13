@@ -1,0 +1,388 @@
+---
+title: "Bayesian modeling and prediction for movies"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(devtools)
+install_github("StatsWithR/statsr")
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(BAS)
+```
+
+### Load data
+ 
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+
+
+* * *
+
+## Part 1: Data
+
+The data is obtained randomly sampling from two databases of movie ratings. As such, analysis on this data can be generalized to the whole population (the totality of the databases), but no causal relation can be infered.
+
+* * *
+
+## Part 2: Data manipulation
+
+The next R script creates the new variables `feature_film`, `drama`, `mpaa_rating_R`, `oscar_season` and `summer_season`. 
+
+```{r}
+movies <- movies %>%
+  mutate(feature_film = ifelse(title_type == "Feature Film", "yes", "no")) %>%
+  mutate(drama = ifelse(genre == "Drama", "yes", "no")) %>%
+  mutate(mpaa_rating_R = ifelse(mpaa_rating == "R", "yes", "no" )) %>%
+  mutate(oscar_season = ifelse( (thtr_rel_month >= 10) & (thtr_rel_month <= 12),
+                                "yes", "no")) %>%
+  
+  mutate(summer_season = ifelse( (thtr_rel_month >= 5) & (thtr_rel_month <= 8),
+                                "yes", "no"))
+```
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+
+We will use the following function to make qq plots with the line showed
+
+```{r}
+qqplot.data <- function (vec) # argument: vector of numbers
+{
+  # following four lines from base R's qqline()
+  y <- quantile(vec[!is.na(vec)], c(0.25, 0.75))
+  x <- qnorm(c(0.25, 0.75))
+  slope <- diff(y)/diff(x)
+  int <- y[1L] - slope * x[1L]
+
+  d <- data.frame(resids = vec)
+
+  ggplot(d, aes(sample = resids)) + stat_qq() + geom_abline(slope = slope, intercept = int)
+}
+```
+
+First lets have a look at the distribution of `audience_score`
+
+```{r}
+summary(movies$audience_score)
+
+movies %>%
+  ggplot(aes(x = audience_score)) +
+  geom_histogram(binwidth = 5)
+```
+
+It is left skewed and unimodal. Lets make it a bit more normal!
+
+```{r}
+movies <- movies %>%
+  mutate(audience_score_norm = qnorm((1 - audience_score/100 )^(2/3)))
+  #mutate(audience_score_norm = qnorm((1 - audience_score/100 )))
+movies %>%
+  ggplot(aes(x = audience_score_norm)) +
+  geom_histogram(binwidth = 0.05)
+```
+
+```{r}
+qqplot.data(movies$audience_score)
+```
+
+This is a normal probability plot for `audience_score`. Now we check the plot for our handmade  varable `audience_score_norm`
+```{r}
+qqplot.data(movies$audience_score_norm)
+``` 
+
+Far from a perfectly normal but way better then the original!
+
+*REMARK* The variable `audience_score_norm` is reversed compared to `audience_score`. So a smaller value of `audience_score_norm` corresponds to an higher value of `audience_score`.
+
+We can now move to explore the new variables we created above.
+
+
+One of the simplest and most indicative plots possible for the 5 new varibles vs `audience_score`are boxplots. After each of them we table some summary statiscits of the score against the considered variable.
+
+*drama*
+
+```{r}
+movies %>%
+  ggplot(aes(x = drama, y = audience_score)) +
+  geom_boxplot()
+```
+
+```{r}
+movies %>%
+  group_by(drama) %>%
+  summarise(avg = mean(audience_score), median = median(audience_score),
+            std = sd(audience_score), IQR = IQR(audience_score), freq = n()/nrow(movies))
+```
+
+Drama films are expected to be better recived by the audience (higher mean and median, lower IQR and std makes the mean and median more significant).
+Morevover, almost half of the sample (46.85%) are drama movies.
+
+*Feature Films*
+
+```{r}
+movies %>%
+  ggplot(aes(x = feature_film, y = audience_score)) +
+  geom_boxplot()
+```
+
+```{r}
+movies %>%
+  group_by(feature_film) %>%
+  summarise(avg = mean(audience_score), median = median(audience_score),
+            std = sd(audience_score), IQR = IQR(audience_score), freq = n()/nrow(movies))
+```
+
+Feature Films are expected to have lower audience score (significantly lower mean and median).
+However a vast majoritiy of movies (90.8%) are Feature Films.
+
+*MPAA Rating R*
+
+```{r}
+movies %>%
+  ggplot(aes(x = mpaa_rating_R, y = audience_score)) +
+  geom_boxplot()
+```
+
+```{r}
+movies %>%
+  group_by(mpaa_rating_R) %>%
+  summarise(avg = mean(audience_score), median = median(audience_score),
+            std = sd(audience_score), IQR = IQR(audience_score), freq = n()/nrow(movies))
+```
+
+Both the plot and the summary statistics suggests that audience scores are indifferent of an MPAA rating R as opposed of another rating. Half of the movies in the sample are rated R.
+
+*Oscar Season*
+
+```{r}
+movies %>%
+  ggplot(aes(x = oscar_season, y = audience_score)) +
+  geom_boxplot()
+```
+
+```{r}
+movies %>%
+  group_by(oscar_season) %>%
+  summarise(avg = mean(audience_score), median = median(audience_score),
+            std = sd(audience_score), IQR = IQR(audience_score), freq = n()/nrow(movies))
+```
+
+Both the plot and the summary statistics suggests that audience scores are indifferent from the movie being released in the Oscar season. 29.34% of the movies are released in Oscar Season.
+
+
+*Summer Season*
+
+```{r}
+movies %>%
+  ggplot(aes(x = summer_season, y = audience_score)) +
+  geom_boxplot()
+```
+```{r}
+movies %>%
+  group_by(summer_season) %>%
+  summarise(avg = mean(audience_score), median = median(audience_score),
+            std = sd(audience_score), IQR = IQR(audience_score), freq = n()/nrow(movies))
+```
+
+Both the plot and the summary statistics suggests that audience scores are indifferent from the movie being released in thesummer season. 31.95% of the movies are released in summer.
+
+* * *
+
+## Part 4: Modeling
+
+There are 16 variables in the full model. This means that there are a total of 2^16 = 65536 possible models.
+
+We use BAS package to du Bayesian Aadapting Sampling, starting from the full model reqired.
+
+```{r}
+movies_nona = na.omit(movies)
+bma_movies = bas.lm(audience_score_norm ~ feature_film +
+                                     drama +
+                                     runtime +
+                                     mpaa_rating_R +
+                                     thtr_rel_year +
+                                     oscar_season +
+                                     summer_season +
+                                     imdb_rating +
+                                     imdb_num_votes +
+                                     critics_score +
+                                     best_pic_nom +
+                                     best_pic_win +
+                                     best_actor_win +
+                                     best_actress_win +
+                                     best_dir_win +
+                                     top200_box,
+                   data = movies_nona,
+                   prior = "BIC", 
+                   modelprior = uniform())
+bma_movies
+```
+
+
+```{r}
+summary(bma_movies)
+```
+
+In order to do predictions, and so compute fitted values and residuals we extract the Best Predictive Model from the BAS. We prefere this over others (Highest Probability Model being a good other candidate) because it is the closest to the Bayesian Model Averaging, and so it shares the spirit of considering more than one model at a time (even if it is just one model, it is selected as the closest to the avarage of all of them).
+
+```{r}
+BPM_pred_movies =  predict(bma_movies, estimator="BPM", se.fit=TRUE)
+```
+Variables used by `BPM_pred_movies`
+
+```{r}
+bma_movies$namesx[BPM_pred_movies$bestmodel + 1]
+```
+
+*Model Interpretation*
+
+Let's extract the coefficients from the BPM, and plot their posterior probability distributions.
+
+```{r}
+movies_coeffs <- coef(bma_movies)
+
+plot(movies_coeffs, subset = c(BPM_pred_movies$bestmodel + 1), ask = F)
+```
+
+We can also show 95% confidence intervals for the coefficients
+
+```{r}
+confint(movies_coeffs, parm = c(BPM_pred_movies$bestmodel + 1))
+```
+
+First recall that `audience_score_norm` is reversed compared to `audience_score`, so negative coefficients indicates POSITIVELY correlated variables to the `audience_score`.
+From the output above and the plots of the posterior distribution of the coefficients, appears surprising the inclusion of `drama` in the BPM, as its coefficient is predicted to be 0 with high probability.
+The two most probable parameters are `imdb_rating` and `runtime`. The first is predicted far from 0 (in the interval -0.43, -0.35) with 95% confidence, so we expect it to be the most relevant for prediction, and positively correlated to `audience_score`.
+The second, `runtime` has an high probability to be non zero, however 0 is its lower bound in a 95% confidence interval. Moreover it is predicted to be positive, i.e. negatively correlated with the `audience_score`.
+
+*Model Dignostic*
+
+Compute the residuals first
+```{r}
+movies_nona <- movies_nona %>%
+  mutate(BPM_fitted = BPM_pred_movies$fit, BPM_resid = audience_score_norm - BPM_fitted)
+  
+```
+
+
+We plot the absolute values of the residuals vs the fitted values:
+```{r}
+movies_nona %>%
+ggplot(aes(x = BPM_fitted, y = abs(BPM_resid))) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  xlab("Fitted values") +
+  ylab("Absolute Value Residuals")
+```
+
+The use of `audience_score_norm`has been helpful here, however there is still some variability on the plot and the assumption of constant variability of the residual is essentially violated.
+
+Now we check the distribution of the residuals
+
+```{r}
+qqplot.data(movies_nona$BPM_resid)
+ggplot(data = movies_nona, aes(x = BPM_resid)) + geom_histogram(binwidth = 0.2)
+```
+
+Residuals are slightly left skewed.
+
+Finally we check the linearity assumption with respect to the variables selected by BPM. 
+We do so plotting the residuals against the variables.
+
+```{r}
+movies_nona %>%
+  ggplot(aes(x = imdb_rating, y = BPM_resid))+
+  geom_point()
+
+movies_nona %>%
+  ggplot(aes(x = runtime, y = BPM_resid))+
+  geom_point()
+
+movies_nona %>%
+  ggplot(aes(x = critics_score, y = BPM_resid))+
+  geom_point()
+
+movies_nona %>%
+  ggplot(aes(x = best_pic_nom, y = BPM_resid)) +
+  geom_boxplot()
+movies_nona %>%
+  ggplot(aes(x = drama, y = BPM_resid)) +
+  geom_boxplot()
+```
+
+There is clearly a problem in the distribution of the residuals with respect to `runtime`  and `imdb_rating`. Also the distribution versus `best_pic_nom` is not optimal. This suggest that the relation between `audience_score_norm` and these variables may be non linear.
+
+
+
+
+
+* * *
+
+## Part 5: Prediction
+
+For the prediction we use Batman v Superman: Dawn of Justice. It was a commercial success but generally considered a bad film, it has critics score 27, an audience score 63 and an imdb rating of 6.6.
+Data were taken from the websites of IMDB, Rotten Tomatoes and BoxOfficeMojo.
+
+```{r}
+BvS <- data.frame(title = "Batman V Superman: dawn of Justice", 
+                  feature_film = "yes",
+                  mpaa_rating_R = "no",
+                  oscar_season = "no",
+                  summer_season = "no",
+                  title_type = "Feature Film",
+                  genre = "Action & Adventure",
+                  drama = "no",
+                  runtime = 151,
+                  mpaa_rating = "PG-13",
+                  thtr_rel_year = 2016,
+                  best_pic_nom = "no",
+                  best_pic_win = "no",
+                  best_dir_win = "no",
+                  best_actor_win = "no",
+                  best_actress_win = "no",
+                  imdb_rating = 6.6,
+                  imdb_num_votes = 496633,
+                  critics_score = 27,
+                  top200_box = "yes")
+
+BvS_predict = predict(bma_movies, newdata = BvS, estimator = "BPM",se.fit = TRUE)
+
+```
+
+We can now compute the explicit prediction for the `audience_score` and its 95% confindence interval. Recall that we have to do some work to go from `audience_score_norm` to `audience_score`
+
+```{r}
+y = confint(BvS_predict)
+(1 - pnorm(y)^(3/2))*100
+```
+
+The resulting prediction of 62.45 is pretty near to the true value of 63. The confidence interval is however a bit large (39, 82.18)
+
+
+
+* * *
+
+## Part 6: Conclusion
+
+This exercises shows that, under a bayesian approach, model selection reduces the number of parameters by a lot, and only keeps few very important variables (important in terms of posterior probability). This is very interesting compared to other model selection tachniques I used in this dataset in previous exercises, where many more varibles where kept.
+
+Even if we have only few variables the prediction with the Best Predictive Model gives a good fitted value, however the confidence interval is large, suggesting low precision. This is what one should expect from a Bayesian approach and more data may improve this.
+
+A remark could be that the score on IMDB is the best predictor for the audience score and is stronger than the critics score from Rotten Tomatoes. This suggests that the rating on imdb is more related to the popularity (audience_score) then critics reviews.
+
+Finally let me remrk again that a lot of linearity assumptions are violated by this model so it would be a good idea to try some non linear regression technique on the same dataset.
